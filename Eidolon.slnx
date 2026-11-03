@@ -1,7 +1,6 @@
 <Solution>
   <Configurations>
     <Platform Name="x64" />
-    <Platform Name="x86" />
   </Configurations>
   <Project Path="Eidolon/Eidolon.vcxproj" Id="d26f61b9-008d-4411-8195-a9e8de71ed03" />
 </Solution>
