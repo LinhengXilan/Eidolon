@@ -1,8 +1,8 @@
 /**
  * @file WinMain.cpp
  * @author LinhengXilan
- * @version 0.0.0.1
- * @date 2026-11-2
+ * @version 0.0.0.3
+ * @date 2026-11-3
  */
 
 #define WIN32_LEAN_AND_MEAN
@@ -43,9 +43,28 @@
 #endif
 
 #include <chrono>
+#include <cstdint>
 #include <Windows.h>
+#include <d3d12.h>
+#include <dxgi1_6.h>
+#include <wrl/client.h>
+
+using Microsoft::WRL::ComPtr;
+using wchar = wchar_t;
+using uint8 = uint8_t;
+using uint16 = uint16_t;
+using uint32 = uint32_t;
+using uint64 = uint64_t;
+using int8 = int8_t;
+using int16 = int16_t;
+using int32 = int32_t;
+using int64 = int64_t;
+using usize = uint64;
+
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+static void LogHresult(const wchar* what, HRESULT hr);
+static bool CreateD3D12Device(ComPtr<ID3D12Device>& outDevice);
 
 int WINAPI wWinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstance, [[maybe_unused]] LPWSTR lpCmdLine, int nShowCmd)
 {
@@ -64,7 +83,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstanc
 		return 1;
 	}
 
-	/* vvv 计算窗口大小 vvv */
+	// 计算窗口大小
 	RECT work{};
 	SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
 	const int workW = work.right - work.left;
@@ -94,6 +113,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstanc
 
 	ShowWindow(hwnd, nShowCmd);
 	UpdateWindow(hwnd);
+
+	ComPtr<ID3D12Device> gDevice;
+	if (!CreateD3D12Device(gDevice))
+	{
+		MessageBox(nullptr, L"创建 D3D12 设备失败，详情看“输出”窗口", L"错误", MB_ICONERROR);
+		return 1;
+	}
 
 	MSG msg{};
 	bool running = true;
@@ -159,4 +185,80 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		return 0;
 	}
 	return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+static void LogHresult(const wchar* what, HRESULT hr)
+{
+	WCHAR buffer[256];
+	swprintf_s(buffer, _countof(buffer), L"[DX12] %s 失败: 0x%08x\n", what, hr);
+	OutputDebugString(buffer);
+}
+
+static bool CreateD3D12Device(ComPtr<ID3D12Device>& outDevice)
+{
+	// 调试层
+#ifdef EIDOLON_DEBUG
+	{
+		ComPtr<ID3D12Debug> debug;
+		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
+		{
+			debug->EnableDebugLayer();
+			OutputDebugString(L"[D3D12] 调试层已启用\n");
+		}
+		else
+		{
+			OutputDebugString(L"[D3D12] 调试层不可用\n");
+		}
+	}
+#endif
+	// DXGI工厂
+	ComPtr<IDXGIFactory7> factory;
+	HRESULT hr = CreateDXGIFactory2(0, IID_PPV_ARGS(&factory));
+	if (FAILED(hr))
+	{
+		LogHresult(L"CreateDXGIFactory2", hr);
+		return false;
+	}
+
+	// 枚举显卡
+	ComPtr<IDXGIAdapter1> chosenAdapter;
+	for (usize i = 0;; ++i)
+	{
+		ComPtr<IDXGIAdapter1> adapter;
+		if (factory->EnumAdapters1(i, adapter.GetAddressOf()) == DXGI_ERROR_NOT_FOUND)
+		{
+			break;
+		}
+		DXGI_ADAPTER_DESC1 desc{};
+		adapter->GetDesc1(&desc);
+		if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+		{
+			continue;
+		}
+		wchar buffer[256];
+		swprintf_s(buffer, _countof(buffer), L"[D3D12] 适配器 %llu: %s | 显存 %llu MB\n", i, desc.Description, static_cast<uint64>(desc.DedicatedVideoMemory / 1024 / 1024));
+		OutputDebugString(buffer);
+
+		// 查询是否支持DirectX12
+		if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, __uuidof(ID3D12Device), nullptr)))
+		{
+			chosenAdapter = adapter;
+			break;
+		}
+	}
+
+	if (!chosenAdapter)
+	{
+		OutputDebugString(L"[DX12] 未找到支持DirectX12的显示适配器\n");
+		return false;
+	}
+
+	hr = D3D12CreateDevice(chosenAdapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&outDevice));
+	if (FAILED(hr))
+	{
+		LogHresult(L"[D3D12] D3D12CreateDevice\n", hr);
+		return false;
+	}
+	OutputDebugString(L"[D3D12] 设备创建成功\n");
+	return true;
 }
