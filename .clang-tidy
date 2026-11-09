@@ -1,0 +1,6 @@
+Checks: >
+	*
+	-clang-diagnostic-language-extension-token
+	-readability-use-std-min-max
+	-performance-avoid-endl
+	-misc-use-anonymous-namespace

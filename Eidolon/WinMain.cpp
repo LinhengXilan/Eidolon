@@ -62,21 +62,31 @@ using int64 = int64_t;
 using usize = uint64;
 using handle = HANDLE;
 
+constexpr uint8 EIDOLON_FRAME_COUNT = 3;
 /* vvv 全局变量 vvv */
 ComPtr<ID3D12Device> gDevice;
 ComPtr<ID3D12CommandQueue> gQueue;
 ComPtr<ID3D12CommandAllocator> gAllocator;
 ComPtr<ID3D12GraphicsCommandList> gList;
 ComPtr<ID3D12Fence> gFence;
+ComPtr<IDXGIFactory6> gFactory;
+ComPtr<IDXGISwapChain3> gSwapChain;
+ComPtr<ID3D12DescriptorHeap> gRtvHeap;
+ComPtr<ID3D12Resource> gRenderTargets[EIDOLON_FRAME_COUNT];
+uint32 gRtvDescriptorSize = 0;
 uint64 gFenceValue = 0;
 handle gFenceEvent = nullptr;
+float gElapsedSecond = 0.0f;
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 static void LogHresult(const wchar* what, HRESULT hr);
 static bool IsWindows11OrGreater();
 static bool CreateD3D12Device(ComPtr<ID3D12Device>& outDevice);
 static bool CreateCommandObjects();
-static void WaitForGpu();
+static bool CreateSwapChain(HWND hwnd);
+static bool CreateRenderTargets();
+static void RenderFrame(float deltaTime);
+static bool WaitForGpu();
 
 namespace Logger
 {
@@ -86,6 +96,7 @@ namespace Logger
 		va_list args;
 		va_start(args, format);
 		vswprintf_s(buffer, _countof(buffer), format, args);
+
 		va_end(args);
 		OutputDebugStringW(buffer);
 		OutputDebugStringW(L"\n");
@@ -103,7 +114,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstanc
 	wndClass.lpfnWndProc = WndProc;
 	wndClass.hInstance = hInstance;
 	wndClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-	wndClass.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+	wndClass.hbrBackground = nullptr;
 	wndClass.lpszClassName = L"EidolonWindow";
 	if (RegisterClassExW(&wndClass) == 0)
 	{
@@ -149,6 +160,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstanc
 	}
 
 	CreateCommandObjects();
+	CreateSwapChain(hwnd);
+	CreateRenderTargets();
 
 	MSG msg{};
 	bool running = true;
@@ -176,19 +189,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstanc
 		const auto nowTime = std::chrono::steady_clock::now();
 		float deltaTime = std::chrono::duration<float>(nowTime - prevTime).count();
 		prevTime = nowTime;
-		if (deltaTime >= 0.1f)
-		{
-			deltaTime = 0.1f;
-		}
 
 		/* vvv vvv */
-		gAllocator->Reset();
-		gList->Reset(gAllocator.Get(), nullptr);
-		gList->Close();
-		ID3D12CommandList* lists[] = {
-			gList.Get()
-		};
-		gQueue->ExecuteCommandLists(1, lists);
+		RenderFrame(gElapsedSecond);
+		gElapsedSecond += 0.001f;
 		WaitForGpu();
 		/* ^^^ ^^^ */
 
@@ -204,8 +208,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstanc
 			frames = 0;
 			accum = 0.0;
 		}
-		Sleep(1);
 	}
+
 	WaitForGpu();
 	CloseHandle(gFenceEvent);
 	return 0;
@@ -271,8 +275,8 @@ static bool CreateD3D12Device(ComPtr<ID3D12Device>& outDevice)
 	}
 #endif
 	// DXGI工厂
-	ComPtr<IDXGIFactory7> factory;
-	HRESULT hr = CreateDXGIFactory2(0, IID_PPV_ARGS(&factory));
+	
+	HRESULT hr = CreateDXGIFactory2(0, IID_PPV_ARGS(&gFactory));
 	if (FAILED(hr))
 	{
 		LogHresult(L"CreateDXGIFactory2", hr);
@@ -281,10 +285,10 @@ static bool CreateD3D12Device(ComPtr<ID3D12Device>& outDevice)
 
 	// 枚举显卡
 	ComPtr<IDXGIAdapter1> chosenAdapter;
-	for (usize i = 0;; ++i)
+	for (uint32 i = 0;; ++i)
 	{
 		ComPtr<IDXGIAdapter1> adapter;
-		if (factory->EnumAdapters1(i, adapter.GetAddressOf()) == DXGI_ERROR_NOT_FOUND)
+		if (gFactory->EnumAdapters1(i, adapter.GetAddressOf()) == DXGI_ERROR_NOT_FOUND)
 		{
 			break;
 		}
@@ -372,13 +376,138 @@ static bool CreateCommandObjects()
 	Logger::Log(L"[Eidolon] CommandObjects创建成功");
 }
 
-static void WaitForGpu()
+static bool CreateSwapChain(HWND hwnd)
+{
+	DXGI_SWAP_CHAIN_DESC1 desc{};
+	desc.Width = 0;	// 0: 跟随客户区
+	desc.Height = 0;
+	desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	desc.Stereo = FALSE;
+	desc.SampleDesc.Count = 1;
+	desc.SampleDesc.Quality = 0;
+	desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	desc.BufferCount = EIDOLON_FRAME_COUNT;
+	desc.Scaling = DXGI_SCALING_STRETCH;
+	desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+	desc.Flags = 0;
+
+	// 创建SwapChain
+	ComPtr<IDXGISwapChain1> swapChain;
+	HRESULT hr = gFactory->CreateSwapChainForHwnd(gQueue.Get(), hwnd, &desc, nullptr, nullptr, &swapChain);
+	if (FAILED(hr))
+	{
+		LogHresult(L"CreateSwapChainForHwnd", hr);
+		return false;
+	}
+
+	// 升级SwapChain
+	hr = swapChain.As(&gSwapChain);
+	if (FAILED(hr))
+	{
+		LogHresult(L"QueryInterface SwapChain3", hr); return false;
+	}
+
+	gFactory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_WINDOW_CHANGES);
+
+	Logger::Log(L"[Eidolon] 交换链创建成功：%u 缓冲，格式 R8G8B8A8_UNORM", EIDOLON_FRAME_COUNT);
+	return true;
+}
+
+static bool CreateRenderTargets()
+{
+	D3D12_DESCRIPTOR_HEAP_DESC desc{};
+	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+	desc.NumDescriptors = EIDOLON_FRAME_COUNT;
+	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	desc.NodeMask = 0;
+
+	HRESULT hr = gDevice->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&gRtvHeap));
+	if (FAILED(hr))
+	{
+		LogHresult(L"CreateDescriptorHeap(RTV)", hr);
+		return false;
+	}
+
+	gRtvDescriptorSize = gDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	D3D12_CPU_DESCRIPTOR_HANDLE rtv = gRtvHeap->GetCPUDescriptorHandleForHeapStart();
+
+	for (uint8 i = 0; i < EIDOLON_FRAME_COUNT; ++i)
+	{
+		hr = gSwapChain->GetBuffer(i, IID_PPV_ARGS(&gRenderTargets[i]));
+		if (FAILED(hr))
+		{
+			LogHresult(L"SwapChain::GetBuffer", hr); return false;
+		}
+		gDevice->CreateRenderTargetView(gRenderTargets[i].Get(), nullptr, rtv);
+		rtv.ptr += gRtvDescriptorSize;
+	}
+	Logger::Log(L"[Eidolon] RTV 创建成功，增量 = %u 字节", gRtvDescriptorSize);
+	return true;
+}
+
+static void RenderFrame(float deltaTime)
+{
+	gAllocator->Reset();
+	gList->Reset(gAllocator.Get(), nullptr);
+
+	// 获取当前帧
+	const uint32 index = gSwapChain->GetCurrentBackBufferIndex();
+	ID3D12Resource* backBuffer = gRenderTargets[index].Get();
+
+	D3D12_RESOURCE_BARRIER barrier{};
+	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+	barrier.Transition.pResource = backBuffer;
+	barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	gList->ResourceBarrier(1, &barrier);
+
+	// 找到对应RTV
+	D3D12_CPU_DESCRIPTOR_HANDLE rtv = gRtvHeap->GetCPUDescriptorHandleForHeapStart();
+	rtv.ptr += static_cast<usize>(gRtvDescriptorSize) * index;
+
+	// 清屏颜色
+	const float r = 0.8f + 0.5f * sin(deltaTime * 1.0f);
+	const float g = 0.3f + 0.5f * cos(deltaTime * 1.3f);
+	const float b = 0.5f + 0.5f * sin(deltaTime * 0.7f);
+	const float clearColor[4] = { r, g, b, 1.0f };
+
+	gList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+	gList->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
+	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+	gList->ResourceBarrier(1, &barrier);
+
+	gList->Close();
+	ID3D12CommandList* lists[] = { gList.Get() };
+	gQueue->ExecuteCommandLists(1, lists);
+	gSwapChain->Present(1, 0);
+}
+
+static bool WaitForGpu()
 {
 	const uint64 value = ++gFenceValue;
-	gQueue->Signal(gFence.Get(), value);
-	if (gFence->GetCompletedValue() < value)
+	HRESULT hr = gQueue->Signal(gFence.Get(), value);	// 向gpu提交一条命令：将gFence置为value
+	if (FAILED(hr))
 	{
-		gFence->SetEventOnCompletion(value, gFenceEvent);
-		WaitForSingleObject(gFenceEvent, INFINITE);
+		LogHresult(L"Signal", hr);      // 常见原因：设备已移除
+		return false;
+	}
+	if (gFence->GetCompletedValue() < value)	// gpu没执行到上述命令时执行
+	{
+		hr = gFence->SetEventOnCompletion(value, gFenceEvent);	// gFence》=value时执行gFenceEvent
+		if (FAILED(hr))
+		{
+			LogHresult(L"SetEventOnCompletion", hr);
+			return false;
+		}
+		if (WaitForSingleObject(gFenceEvent, INFINITE) != WAIT_OBJECT_0)
+		{
+			Logger::Log(L"[Eidolon] 等待 GPU 超时，设备移除原因 0x%08X",
+			            static_cast<unsigned>(gDevice->GetDeviceRemovedReason()));
+			return false;
+		}
 	}
 }
