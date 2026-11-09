@@ -1,8 +1,8 @@
 /**
  * @file WinMain.cpp
  * @author LinhengXilan
- * @version 0.0.0.3
- * @date 2026-11-3
+ * @version 0.0.0.5
+ * @date 2026-11-9
  */
 
 #define WIN32_LEAN_AND_MEAN
@@ -48,18 +48,9 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <wrl/client.h>
+#include <Types.h>
 
 using Microsoft::WRL::ComPtr;
-using wchar = wchar_t;
-using uint8 = uint8_t;
-using uint16 = uint16_t;
-using uint32 = uint32_t;
-using uint64 = uint64_t;
-using int8 = int8_t;
-using int16 = int16_t;
-using int32 = int32_t;
-using int64 = int64_t;
-using usize = uint64;
 using handle = HANDLE;
 
 constexpr uint8 EIDOLON_FRAME_COUNT = 3;
@@ -78,7 +69,7 @@ uint64 gFenceValue = 0;
 handle gFenceEvent = nullptr;
 float gElapsedSecond = 0.0f;
 
-LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 static void LogHresult(const wchar* what, HRESULT hr);
 static bool IsWindows11OrGreater();
 static bool CreateD3D12Device(ComPtr<ID3D12Device>& outDevice);
@@ -299,7 +290,7 @@ static bool CreateD3D12Device(ComPtr<ID3D12Device>& outDevice)
 			continue;
 		}
 		wchar buffer[256];
-		swprintf_s(buffer, _countof(buffer), L"[D3D12] 适配器 %llu: %s | 显存 %llu MB\n", i, desc.Description, static_cast<uint64>(desc.DedicatedVideoMemory / 1024 / 1024));
+		swprintf_s(buffer, _countof(buffer), L"[D3D12] 适配器 %u: %s | 显存 %llu MB\n", i, desc.Description, desc.DedicatedVideoMemory / 1024 / 1024);
 		OutputDebugStringW(buffer);
 
 		// 查询是否支持DirectX12
@@ -510,4 +501,5 @@ static bool WaitForGpu()
 			return false;
 		}
 	}
+	return true;
 }
