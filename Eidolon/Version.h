@@ -1,8 +1,8 @@
 /**
  * @file Version.h
  * @author LinhengXilan
- * @version 0.0.0.6
- * @date 2026-11-11
+ * @version 0.0.0.7
+ * @date 2026-11-19
  */
 
 #ifndef VERSION_H
@@ -15,7 +15,7 @@ namespace Version
 	constexpr uint8 Major = 0;
 	constexpr uint8 Minor = 0;
 	constexpr uint8 Patch = 0;
-	constexpr uint8 Build = 5;
+	constexpr uint8 Build = 7;
 }
 
 #endif

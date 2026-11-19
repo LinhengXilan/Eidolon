@@ -1,16 +1,14 @@
 /**
  * @file WinMain.cpp
  * @author LinhengXilan
- * @version 0.0.0.6
- * @date 2026-11-11
+ * @version 0.0.0.7
+ * @date 2026-11-19
  */
 
 #include <Pch.h>
 #include <Renderer.h>
 
 using Microsoft::WRL::ComPtr;
-
-float gElapsedSecond = 0.0f;
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 static bool IsWindows11OrGreater();
@@ -99,9 +97,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstanc
 		prevTime = nowTime;
 
 		/* vvv vvv */
-		renderer.BeginFrame(gElapsedSecond);
-		gElapsedSecond += 0.001f;
-		renderer.WaitForGpu();
+		renderer.BeginFrame(deltaTime);
+		renderer.EndFrame();
 		/* ^^^ ^^^ */
 
 		frames++;
