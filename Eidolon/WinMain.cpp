@@ -1,14 +1,18 @@
 /**
  * @file WinMain.cpp
  * @author LinhengXilan
- * @version 0.0.0.7
- * @date 2026-11-19
+ * @version 0.0.0.8
+ * @date 2026-11-24
  */
 
 #include <Pch.h>
 #include <Renderer.h>
 
 using Microsoft::WRL::ComPtr;
+
+static uint32 gPendingWidth = 0;
+static uint32 gPendingHeight = 0;
+static bool gResizePending = false;
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 static bool IsWindows11OrGreater();
@@ -63,9 +67,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstanc
 	ShowWindow(hwnd, nShowCmd);
 	UpdateWindow(hwnd);
 
-
+	/* vvv vvv */
 	Renderer renderer;
 	renderer.Initialize(hwnd);
+	gResizePending = false;
+	/* ^^^ ^^^ */
 
 	MSG msg{};
 	bool running = true;
@@ -97,6 +103,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, [[maybe_unused]] HINSTANCE hPrevInstanc
 		prevTime = nowTime;
 
 		/* vvv vvv */
+		if (gResizePending)
+		{
+			renderer.OnResize(gPendingWidth, gPendingHeight);
+			gResizePending = false;
+		}
 		renderer.BeginFrame(deltaTime);
 		renderer.EndFrame();
 		/* ^^^ ^^^ */
@@ -127,6 +138,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		{
 			DestroyWindow(hwnd);
 		}
+		return 0;
+	case WM_SIZE:
+		const uint32 width = LOWORD(lParam);
+		const uint32 height = HIWORD(lParam);
+		if (width == 0 || height == 0)
+		{
+			return 0;
+		}
+		gPendingHeight = height;
+		gPendingWidth = width;
+		gResizePending = true;
 		return 0;
 	}
 	return DefWindowProcW(hwnd, msg, wParam, lParam);

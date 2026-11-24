@@ -1,8 +1,8 @@
 /**
  * @file Renderer.cpp
  * @author LinhengXilan
- * @version 0.0.0.7
- * @date 2026-11-19
+ * @version 0.0.0.8
+ * @date 2026-11-24
  */
 
 #include <Pch.h>
@@ -79,16 +79,16 @@ void Renderer::Initialize(HWND hwnd)
 		break;
 	}
 
+	if (!mAdapter)
+	{
+		Logger::Log(L"没有可用的显示适配器");
+		return;
+	}
 	// 创建设备。
 	hr = D3D12CreateDevice(mAdapter.Get(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&mDevice));
 	if (FAILED(hr))
 	{
 		Logger::LogHresult(L"D3D12", L"D3D12CreateDevice", hr);
-		return;
-	}
-	if (!mAdapter)
-	{
-		Logger::Log(L"没有可用的显示适配器");
 		return;
 	}
 	
@@ -376,5 +376,52 @@ bool Renderer::WaitForFence(uint64 value)
 		Logger::Log(L"[D3D12] 等待围栏超时，原因：%08X", static_cast<uint32>(mDevice->GetDeviceRemovedReason()));
 		return false;
 	}
+	return true;
+}
+
+bool Renderer::OnResize(uint32 width, uint32 height)
+{
+	if (!mSwapChain || width == 0 || height == 0)
+	{
+		return false;
+	}
+	if (mFrameActive)
+	{
+		Logger::Log(L"[DXGI] OnResize 失败：当前帧仍在录制");
+		return false;
+	}
+	if (!WaitForGpu())
+	{
+		Logger::Log(L"[DXGI] OnResize 失败：等待 GPU 超时");
+		return false;
+	}
+	for (uint32 i = 0; i < FRAME_COUNT; ++i)
+	{
+		mRenderTargets[i].Reset();
+	}
+
+	HRESULT hr = mSwapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
+	if (FAILED(hr))
+	{
+		Logger::LogHresult(L"DXGI", L"ResizeBuffers", hr);
+		return false;
+	}
+
+	D3D12_CPU_DESCRIPTOR_HANDLE rtv = mRtvHeap->GetCPUDescriptorHandleForHeapStart();
+	for (uint32 i = 0; i < FRAME_COUNT; ++i)
+	{
+		hr = mSwapChain->GetBuffer(i, IID_PPV_ARGS(&mRenderTargets[i]));
+		if (FAILED(hr))
+		{
+			Logger::LogHresult(L"DXGI", L"GetBuffer", hr);
+			return false;
+		}
+
+		mDevice->CreateRenderTargetView(mRenderTargets[i].Get(), nullptr, rtv);
+		rtv.ptr += mRtvDescriptorSize;
+	}
+
+	mFrameActive = false;
+	Logger::Log(L"[DXGI] 交换链已重建：%u x %u", width, height);
 	return true;
 }

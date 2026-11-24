@@ -1,8 +1,8 @@
 /**
  * @file Renderer.h
  * @author LinhengXilan
- * @version 0.0.0.7
- * @date 2026-11-19
+ * @version 0.0.0.8
+ * @date 2026-11-24
  */
 
 #ifndef RENDERER_H
@@ -29,6 +29,7 @@ public:
 	void EndFrame();
 	bool WaitForGpu();
 	bool WaitForFence(uint64 value);
+	bool OnResize(uint32 width, uint32 height);
 
 private:
 	static constexpr uint8 FRAME_COUNT = 3;
